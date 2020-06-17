@@ -193,6 +193,38 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         }
 
         /// <summary>
+        /// Sends a message to a conversation from OC service.
+        /// </summary>
+        /// <param name="botAppId">The application ID of the bot. This parameter is ignored in
+        /// single tenant the Adapters (Console, Test, etc) but is critical to the BotFrameworkAdapter
+        /// which is multi-tenant aware. </param>
+        /// <param name="reference">A reference to the conversation to continue.</param>
+        /// <param name="callback">The method to call for the resulting bot turn.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects.</param>
+        /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+        public async Task<object> ContinueConversation(string botAppId, ConversationReference reference, BotCallbackHandler callback, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(botAppId))
+            {
+                throw new ArgumentNullException(nameof(botAppId));
+            }
+
+            if (reference == null)
+            {
+                throw new ArgumentNullException(nameof(reference));
+            }
+
+            if (callback == null)
+            {
+                throw new ArgumentNullException(nameof(callback));
+            }
+
+            _logger.LogInformation($"Sending proactive message. botAppId: {botAppId}");
+
+            return await ProcessActivity(reference.GetContinuationActivity(), callback, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// Process the request from WeChat.
         /// This method can be called from inside a POST method on any Controller implementation.
         /// </summary>
@@ -377,6 +409,50 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                             await ProcessBotResponse(activities, activity.From.Id).ConfigureAwait(false);
                         });
                         return null;
+                    }
+                    catch (Exception e)
+                    {
+                        // TODO: exception handling when send message to wechat api failed.
+                        _logger.LogError(e, "Failed to process bot response.");
+                        throw;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (OnTurnError != null)
+                    {
+                        // exception handing when bot throw an exception.
+                        await OnTurnError(context, ex).ConfigureAwait(false);
+                        return null;
+                    }
+
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Process the activity and send responses to WeChat.
+        /// </summary>
+        /// <param name="activity">The updated activity in the form '{id: `id of activity to update`, ...}'.</param>
+        /// <param name="callback">The method to call for the resulting bot turn.</param>
+        /// <param name="cancellationToken">A cancellation token that can be used by other objects
+        /// or threads to receive notice of cancellation.</param>
+        /// <returns>WeChat response or ChannelData bot provided.</returns>
+        private async Task<object> ProcessActivity(Activity activity, BotCallbackHandler callback, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            using (var context = new TurnContext(this, activity))
+            {
+                try
+                {
+                    var responses = new List<Activity>();
+                    context.TurnState.Add(TurnResponseKey, responses);
+                    await RunPipelineAsync(context, callback, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        var activities = responses;
+
+                        return await ProcessBotResponse(activities, activity.From.Id).ConfigureAwait(false);
                     }
                     catch (Exception e)
                     {

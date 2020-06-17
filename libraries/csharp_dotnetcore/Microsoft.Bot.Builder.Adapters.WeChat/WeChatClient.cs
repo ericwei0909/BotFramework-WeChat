@@ -5,8 +5,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Mime;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -69,6 +71,38 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         {
             var accessToken = await GetAccessTokenAsync().ConfigureAwait(false);
             return $"{ApiHost}/cgi-bin/media/get?access_token={accessToken}&media_id={mediaId}";
+        }
+
+        /// <summary>
+        /// Get image name from mediaId.
+        /// </summary>
+        /// <param name="mediaId">The media Id.</param>
+        /// <returns>Image name.</returns>
+        public async Task<string> GetImageName(string mediaId)
+        {
+            WebResponse response = null;
+            string fileName = string.Empty;
+
+            try
+            {
+                var requestUri = await GetMediaUrlAsync(mediaId).ConfigureAwait(false);
+
+                var request = WebRequest.Create(new Uri(requestUri));
+                response = request.GetResponse();
+                string contentDispositionString = response.Headers["Content-Disposition"];
+
+                if (!string.IsNullOrEmpty(contentDispositionString))
+                {
+                    var contentDisposition = new ContentDisposition(contentDispositionString);
+                    fileName = contentDisposition.FileName;
+                }
+
+                return fileName;
+            }
+            catch (Exception)
+            {
+                return mediaId;
+            }
         }
 
         /// <summary>

@@ -91,6 +91,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 {
                     ContentType = MimeTypesMap.GetMimeType(imageRequest.PicUrl) ?? MediaTypes.Image,
                     ContentUrl = imageRequest.PicUrl,
+                    Name = await _wechatClient.GetImageName(imageRequest.MediaId).ConfigureAwait(false),
                 };
                 activity.Attachments.Add(attachment);
             }
