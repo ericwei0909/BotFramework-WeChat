@@ -882,7 +882,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                     StringContent stringContent = null;
                     if (isTemporaryMedia == false && attachmentData.Type.Contains(MediaTypes.Video))
                     {
-                        var additionalForm = string.Format(CultureInfo.InvariantCulture, "{{\"title\":\"{0}\", \"introduction\":\"introduction\"}}", attachmentData.Name);
+                        var additionalForm = string.Format(CultureInfo.InvariantCulture, "{{\"title\":\"{0}\"}}", attachmentData.Name);
 
                         // Important! name must be "description"
                         stringContent = new StringContent(additionalForm);
