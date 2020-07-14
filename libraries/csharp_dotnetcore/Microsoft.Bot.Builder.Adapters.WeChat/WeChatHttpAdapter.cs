@@ -6,11 +6,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Bot.Builder.Adapters.WeChat.Common;
 using Microsoft.Bot.Builder.Adapters.WeChat.Helpers;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema.Requests;
@@ -40,11 +42,13 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         public WeChatHttpAdapter(
                     WeChatSettings settings,
                     IStorage storage,
+                    IAccessTokenProvider accessTokenProvider,
+                    HttpClient httpClient,
                     IBackgroundTaskQueue taskQueue = null,
                     ILogger logger = null)
         {
             _settings = settings;
-            _wechatClient = new WeChatClient(settings, storage, logger);
+            _wechatClient = new WeChatClient(settings, storage, accessTokenProvider, httpClient, logger);
             _wechatMessageMapper = new WeChatMessageMapper(_wechatClient, settings.UploadTemporaryMedia, logger);
             _logger = logger ?? NullLogger.Instance;
             _taskQueue = taskQueue;

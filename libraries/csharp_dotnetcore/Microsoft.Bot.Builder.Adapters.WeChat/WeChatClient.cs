@@ -13,6 +13,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Bot.Builder.Adapters.WeChat.Common;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema.JsonResults;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema.Responses;
@@ -40,26 +41,26 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
     internal class WeChatClient : IDisposable
     {
         private const string ApiHost = "https://api.weixin.qq.com";
-        private static readonly HttpClient HttpClient = new HttpClient();
-
         private readonly WeChatSettings _settings;
         private readonly ILogger _logger;
         private readonly WeChatAttachmentStorage _attachmentStorage;
-        private readonly AccessTokenStorage _tokenStorage;
         private readonly IAttachmentHash _attachmentHash;
-        private SemaphoreSlim _semaphore;
+        private readonly IAccessTokenProvider _accessTokenProvider;
+        private readonly HttpClient _httpClient;
 
         public WeChatClient(
             WeChatSettings settings,
             IStorage storage,
+            IAccessTokenProvider accessTokenProvider,
+            HttpClient httpClient,
             ILogger logger = null)
         {
             _settings = settings;
             _attachmentStorage = new WeChatAttachmentStorage(storage);
-            _tokenStorage = new AccessTokenStorage(storage);
+            _accessTokenProvider = accessTokenProvider;
+            _httpClient = httpClient;
             _logger = logger ?? NullLogger.Instance;
             _attachmentHash = new AttachmentHash();
-            _semaphore = new SemaphoreSlim(1);
         }
 
         /// <summary>
@@ -150,28 +151,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <returns>Access token string.</returns>
         public virtual async Task<string> GetAccessTokenAsync(bool forceRefresh = false)
         {
-            var token = await _tokenStorage.GetAsync(_settings.AppId).ConfigureAwait(false);
-
-            // Double checked locking here to reduce the time cost.
-            if (token == null || forceRefresh)
-            {
-                try
-                {
-                    await _semaphore.WaitAsync().ConfigureAwait(false);
-
-                    // Making get and update access token as a transaction.
-                    // Ensure only one thread can update token and other thread won't get the expired token when updating.
-                    token = await _tokenStorage.GetAsync(_settings.AppId).ConfigureAwait(false);
-                    if (token == null || forceRefresh)
-                    {
-                        token = await UpdateAccessTokenAsync().ConfigureAwait(false);
-                    }
-                }
-                finally
-                {
-                    _semaphore.Release();
-                }
-            }
+            var token = await _accessTokenProvider.GetAccessToken(_settings.AppId, _settings.AppSecret).ConfigureAwait(false);
 
             return token.Token;
         }
@@ -634,6 +614,31 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             return await SendMessageToUser(data, timeout).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Get new access token from WeChat and update current cached token result.
+        /// </summary>
+        /// <param name="appId">WeChat Application Id.</param>
+        /// <param name="appSecret">WeChat Application Secret.</param>
+        /// <returns>A new <seealso cref="WeChatAccessToken"/> of current account.</returns>
+        public async Task<WeChatAccessToken> RetrieveAccessTokenAsync(string appId, string appSecret)
+        {
+            var url = GetAccessTokenEndPoint(appId, appSecret);
+            var bytes = await SendHttpRequestAsync(HttpMethod.Get, url).ConfigureAwait(false);
+            var tokenResult = ConvertBytesToType<AccessTokenResult>(bytes);
+            CheckWeChatApiResponse(tokenResult);
+
+            var newToken = new WeChatAccessToken()
+            {
+                AppId = appId,
+                Secret = appSecret,
+                ExpireTime = DateTimeOffset.UtcNow.AddSeconds(tokenResult.ExpireIn),
+                Token = tokenResult.Token,
+                ETag = "*",
+            };
+
+            return newToken;
+        }
+
         public void Dispose()
         {
             Dispose(true);
@@ -649,16 +654,6 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 {
                     _attachmentStorage.Dispose();
                 }
-
-                if (_tokenStorage != null)
-                {
-                    _tokenStorage.Dispose();
-                }
-
-                if (_semaphore != null)
-                {
-                    _semaphore.Dispose();
-                }
             }
         }
 
@@ -671,7 +666,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <param name="data">Request data.</param>
         /// <param name="cancellationToken">Cancellation token to cancell the request.</param>
         /// <returns>Http response content as byte array.</returns>
-        private static async Task<byte[]> MakeHttpRequestAsync(string token, HttpMethod method, string url, object data = null, CancellationToken cancellationToken = default(CancellationToken))
+        private async Task<byte[]> MakeHttpRequestAsync(string token, HttpMethod method, string url, object data = null, CancellationToken cancellationToken = default(CancellationToken))
         {
             try
             {
@@ -688,7 +683,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                         requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                     }
 
-                    using (var response = await HttpClient.SendAsync(requestMessage, cancellationToken).ConfigureAwait(false))
+                    using (var response = await _httpClient.SendAsync(requestMessage, cancellationToken).ConfigureAwait(false))
                     {
                         if (!response.IsSuccessStatusCode)
                         {
@@ -705,7 +700,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             }
         }
 
-        private static string GetAccessTokenEndPoint(string appId, string appSecret)
+        private string GetAccessTokenEndPoint(string appId, string appSecret)
         {
             return $"{ApiHost}/cgi-bin/token?grant_type=client_credential&appid={appId}&secret={appSecret}";
         }
@@ -716,7 +711,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <param name="name">The name of the attachment media.</param>
         /// <param name="type">The media's fallback type.</param>
         /// <returns>Media file extension.</returns>
-        private static string GetMediaExtension(string name, string type)
+        private string GetMediaExtension(string name, string type)
         {
             var ext = MimeTypesMap.GetExtension(type);
             if (string.IsNullOrEmpty(ext))
@@ -744,29 +739,6 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             }
 
             return $".{ext}";
-        }
-
-        /// <summary>
-        /// Get new access token from WeChat and update current cached token result.
-        /// </summary>
-        /// <returns>A new <seealso cref="WeChatAccessToken"/> of current account.</returns>
-        private async Task<WeChatAccessToken> UpdateAccessTokenAsync()
-        {
-            var url = GetAccessTokenEndPoint(_settings.AppId, _settings.AppSecret);
-            var bytes = await SendHttpRequestAsync(HttpMethod.Get, url).ConfigureAwait(false);
-            var tokenResult = ConvertBytesToType<AccessTokenResult>(bytes);
-            CheckWeChatApiResponse(tokenResult);
-
-            var newToken = new WeChatAccessToken()
-            {
-                AppId = _settings.AppId,
-                Secret = _settings.AppSecret,
-                ExpireTime = DateTimeOffset.UtcNow.AddSeconds(tokenResult.ExpireIn),
-                Token = tokenResult.Token,
-                ETag = "*",
-            };
-            await _tokenStorage.SaveAsync(_settings.AppId, newToken).ConfigureAwait(false);
-            return newToken;
         }
 
         /// <summary>
