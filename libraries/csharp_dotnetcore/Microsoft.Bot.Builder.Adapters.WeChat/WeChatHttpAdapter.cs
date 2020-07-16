@@ -6,13 +6,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Bot.Builder.Adapters.WeChat.Common;
 using Microsoft.Bot.Builder.Adapters.WeChat.Helpers;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema;
 using Microsoft.Bot.Builder.Adapters.WeChat.Schema.Requests;
@@ -40,16 +38,13 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         private readonly IBackgroundTaskQueue _taskQueue;
 
         public WeChatHttpAdapter(
-                    WeChatSettings settings,
-                    IStorage storage,
-                    IWeChatAccessTokenProvider accessTokenProvider,
-                    HttpClient httpClient,
+                    WeChatClient client,
+                    WeChatMessageMapper messageMapper,
                     IBackgroundTaskQueue taskQueue = null,
                     ILogger logger = null)
         {
-            _settings = settings;
-            _wechatClient = new WeChatClient(storage, accessTokenProvider, httpClient, logger);
-            _wechatMessageMapper = new WeChatMessageMapper(_wechatClient, settings.UploadTemporaryMedia, logger);
+            _wechatClient = client;
+            _wechatMessageMapper = messageMapper;
             _logger = logger ?? NullLogger.Instance;
             _taskQueue = taskQueue;
         }
@@ -198,15 +193,15 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// Process the request from WeChat.
         /// This method can be called from inside a POST method on any Controller implementation.
         /// </summary>
-        /// <param name="settings">WeChat settings.</param>
         /// <param name="httpRequest">The HTTP request object, typically in a POST handler by a Controller.</param>
         /// <param name="httpResponse">The HTTP response object.</param>
         /// <param name="bot">The bot implementation.</param>
         /// <param name="secretInfo">The secret info provide by WeChat.</param>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="cancellationToken">A cancellation token that can be used by other objects
         /// or threads to receive notice of cancellation.</param>
         /// <returns>A task that represents the work queued to execute.</returns>
-        public async Task ProcessAsync(WeChatSettings settings, HttpRequest httpRequest, HttpResponse httpResponse, IBot bot, SecretInfo secretInfo, CancellationToken cancellationToken = default(CancellationToken))
+        public async Task ProcessAsync(HttpRequest httpRequest, HttpResponse httpResponse, IBot bot, SecretInfo secretInfo, WeChatSettings settings, CancellationToken cancellationToken = default(CancellationToken))
         {
             _logger.LogInformation("Receive a new request from WeChat.");
             if (httpRequest == null)
