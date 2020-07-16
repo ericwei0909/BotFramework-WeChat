@@ -37,7 +37,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
     /// WeChat message mapper will help create the bot activity and WeChat response.
     /// When deal with the media attachments or cards, mapper will upload the data first to aquire the acceptable media url.
     /// </remarks>
-    internal class WeChatMessageMapper
+    public class WeChatMessageMapper
     {
         /// <summary>
         /// Key of content source url.
@@ -75,9 +75,10 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Convert WeChat message to Activity.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="wechatRequest">WeChat request message.</param>
         /// <returns>Activity.</returns>
-        public async Task<Activity> ToConnectorMessage(IRequestMessageBase wechatRequest)
+        public async Task<Activity> ToConnectorMessage(WeChatSettings settings, IRequestMessageBase wechatRequest)
         {
             var activity = CreateActivity(wechatRequest);
             if (wechatRequest is TextRequest textRequest)
@@ -91,7 +92,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 {
                     ContentType = MimeTypesMap.GetMimeType(imageRequest.PicUrl) ?? MediaTypes.Image,
                     ContentUrl = imageRequest.PicUrl,
-                    Name = await _wechatClient.GetImageName(imageRequest.MediaId).ConfigureAwait(false),
+                    Name = await _wechatClient.GetImageName(settings, imageRequest.MediaId).ConfigureAwait(false),
                 };
                 activity.Attachments.Add(attachment);
             }
@@ -101,7 +102,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 var attachment = new Attachment
                 {
                     ContentType = MimeTypesMap.GetMimeType(voiceRequest.Format) ?? MediaTypes.Voice,
-                    ContentUrl = await _wechatClient.GetMediaUrlAsync(voiceRequest.MediaId).ConfigureAwait(false),
+                    ContentUrl = await _wechatClient.GetMediaUrlAsync(settings, voiceRequest.MediaId).ConfigureAwait(false),
                 };
                 activity.Attachments.Add(attachment);
             }
@@ -111,8 +112,8 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 {
                     // video request don't have format, type will be value.
                     ContentType = MediaTypes.Video,
-                    ContentUrl = await _wechatClient.GetMediaUrlAsync(videoRequest.MediaId).ConfigureAwait(false),
-                    ThumbnailUrl = await _wechatClient.GetMediaUrlAsync(videoRequest.ThumbMediaId).ConfigureAwait(false),
+                    ContentUrl = await _wechatClient.GetMediaUrlAsync(settings, videoRequest.MediaId).ConfigureAwait(false),
+                    ThumbnailUrl = await _wechatClient.GetMediaUrlAsync(settings, videoRequest.ThumbMediaId).ConfigureAwait(false),
                 };
                 activity.Attachments.Add(attachment);
             }
@@ -121,8 +122,8 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 var attachment = new Attachment
                 {
                     ContentType = MediaTypes.Video,
-                    ContentUrl = await _wechatClient.GetMediaUrlAsync(shortVideoRequest.MediaId).ConfigureAwait(false),
-                    ThumbnailUrl = await _wechatClient.GetMediaUrlAsync(shortVideoRequest.ThumbMediaId).ConfigureAwait(false),
+                    ContentUrl = await _wechatClient.GetMediaUrlAsync(settings, shortVideoRequest.MediaId).ConfigureAwait(false),
+                    ThumbnailUrl = await _wechatClient.GetMediaUrlAsync(settings, shortVideoRequest.ThumbMediaId).ConfigureAwait(false),
                 };
                 activity.Attachments.Add(attachment);
             }
@@ -148,9 +149,10 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Convert response message from Bot format to Wechat format.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">message activity received from bot.</param>
         /// <returns>WeChat message list.</returns>
-        public async Task<IList<IResponseMessageBase>> ToWeChatMessages(IActivity activity)
+        public async Task<IList<IResponseMessageBase>> ToWeChatMessages(WeChatSettings settings, IActivity activity)
         {
             try
             {
@@ -171,19 +173,19 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                         IList<IResponseMessageBase> attachmentResponses = new List<IResponseMessageBase>();
                         if (attachment.ContentType == AdaptiveCard.ContentType || attachment.ContentType == "application/adaptive-card")
                         {
-                            attachmentResponses = await ProcessAdaptiveCardAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessAdaptiveCardAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else if (attachment.ContentType == AudioCard.ContentType)
                         {
-                            attachmentResponses = await ProcessAudioCardAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessAudioCardAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else if (attachment.ContentType == AnimationCard.ContentType)
                         {
-                            attachmentResponses = await ProcessAnimationCardAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessAnimationCardAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else if (attachment.ContentType == HeroCard.ContentType)
                         {
-                            attachmentResponses = await ProcessHeroCardAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessHeroCardAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else if (attachment.ContentType == ThumbnailCard.ContentType)
                         {
@@ -203,14 +205,14 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                         }
                         else if (attachment.ContentType == VideoCard.ContentType)
                         {
-                            attachmentResponses = await ProcessVideoCardAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessVideoCardAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else if (attachment != null &&
                                     (!string.IsNullOrEmpty(attachment.ContentUrl) ||
                                      attachment.Content != null ||
                                      !string.IsNullOrEmpty(attachment.ThumbnailUrl)))
                         {
-                            attachmentResponses = await ProcessAttachmentAsync(messageActivity, attachment).ConfigureAwait(false);
+                            attachmentResponses = await ProcessAttachmentAsync(settings, messageActivity, attachment).ConfigureAwait(false);
                         }
                         else
                         {
@@ -512,10 +514,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Process all types of general attachment.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">The message activity.</param>
         /// <param name="attachment">The attachment object need to be processed.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessAttachmentAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessAttachmentAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var responseList = new List<IResponseMessageBase>();
 
@@ -529,17 +532,17 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
 
             if (!string.IsNullOrEmpty(attachment.ThumbnailUrl))
             {
-                responseList.Add(await MediaContentToWeChatResponse(activity, attachment.Name, attachment.ThumbnailUrl, attachment.ContentType).ConfigureAwait(false));
+                responseList.Add(await MediaContentToWeChatResponse(settings, activity, attachment.Name, attachment.ThumbnailUrl, attachment.ContentType).ConfigureAwait(false));
             }
 
             if (!string.IsNullOrEmpty(attachment.ContentUrl))
             {
-                responseList.Add(await MediaContentToWeChatResponse(activity, attachment.Name, attachment.ContentUrl, attachment.ContentType).ConfigureAwait(false));
+                responseList.Add(await MediaContentToWeChatResponse(settings, activity, attachment.Name, attachment.ContentUrl, attachment.ContentType).ConfigureAwait(false));
             }
 
             if (AttachmentHelper.IsUrl(attachment.Content))
             {
-                responseList.Add(await MediaContentToWeChatResponse(activity, attachment.Name, attachment.Content.ToString(), attachment.ContentType).ConfigureAwait(false));
+                responseList.Add(await MediaContentToWeChatResponse(settings, activity, attachment.Name, attachment.Content.ToString(), attachment.ContentType).ConfigureAwait(false));
             }
             else if (attachment.Content != null)
             {
@@ -552,10 +555,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Create a News instance use hero card.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity received from bot.</param>
         /// <param name="heroCard">Hero card instance.</param>
         /// <returns>A new instance of News create by hero card.</returns>
-        private async Task<News> CreateNewsFromHeroCard(IMessageActivity activity, HeroCard heroCard)
+        private async Task<News> CreateNewsFromHeroCard(WeChatSettings settings, IMessageActivity activity, HeroCard heroCard)
         {
             if (heroCard.Images == null || heroCard.Images.Count == 0)
             {
@@ -578,7 +582,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             foreach (var image in heroCard.Images)
             {
                 // MP news image is required and can not be a temporary media.
-                var mediaMessage = await MediaContentToWeChatResponse(activity, image.Alt, image.Url, MediaTypes.Image).ConfigureAwait(false);
+                var mediaMessage = await MediaContentToWeChatResponse(settings, activity, image.Alt, image.Url, MediaTypes.Image).ConfigureAwait(false);
                 news.ThumbMediaId = (mediaMessage as ImageResponse).Image.MediaId;
                 news.ThumbUrl = image.Url;
             }
@@ -589,11 +593,12 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Create WeChat news instance from the given adaptive card.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity received from bot.</param>
         /// <param name="adaptiveCard">Adaptive card instance.</param>
         /// <param name="title">Title or name of the card attachment.</param>
         /// <returns>A <seealso cref="News"/> converted from adaptive card.</returns>
-        private async Task<News> CreateNewsFromAdaptiveCard(IMessageActivity activity, AdaptiveCard adaptiveCard, string title)
+        private async Task<News> CreateNewsFromAdaptiveCard(WeChatSettings settings, IMessageActivity activity, AdaptiveCard adaptiveCard, string title)
         {
             try
             {
@@ -611,12 +616,12 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                 var schemaVersion = renderer.SupportedSchemaVersion;
                 var converImageUrl = adaptiveCard.AdditionalProperties[CoverImageUrlKey].ToString();
                 var attachmentData = await CreateAttachmentDataAsync(title ?? activity.Text, converImageUrl, MediaTypes.Image).ConfigureAwait(false);
-                var thumbMediaId = (await _wechatClient.UploadMediaAsync(attachmentData, false).ConfigureAwait(false)).MediaId;
+                var thumbMediaId = (await _wechatClient.UploadMediaAsync(settings, attachmentData, false).ConfigureAwait(false)).MediaId;
 
                 // Replace all image URL to WeChat acceptable URL
                 foreach (var element in adaptiveCard.Body)
                 {
-                    await ReplaceAdaptiveImageUri(element).ConfigureAwait(false);
+                    await ReplaceAdaptiveImageUri(settings, element).ConfigureAwait(false);
                 }
 
                 // Render the card
@@ -652,14 +657,15 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// WeChat won't accept the image link outside its domain, recursive upload the image to get the url first.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="element">Adaptive card element.</param>
         /// <returns>Task of replace the adaptive card image uri.</returns>
-        private async Task ReplaceAdaptiveImageUri(AdaptiveElement element)
+        private async Task ReplaceAdaptiveImageUri(WeChatSettings settings, AdaptiveElement element)
         {
             if (element is AdaptiveImage adaptiveImage)
             {
                 var attachmentData = await CreateAttachmentDataAsync(adaptiveImage.AltText ?? adaptiveImage.Id, adaptiveImage.Url.AbsoluteUri, adaptiveImage.Type).ConfigureAwait(false);
-                var uploadResult = await _wechatClient.UploadNewsImageAsync(attachmentData).ConfigureAwait(false) as UploadPersistentMediaResult;
+                var uploadResult = await _wechatClient.UploadNewsImageAsync(settings, attachmentData).ConfigureAwait(false) as UploadPersistentMediaResult;
                 adaptiveImage.Url = new Uri(uploadResult.Url);
                 return;
             }
@@ -668,21 +674,21 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             {
                 foreach (var image in imageSet.Images)
                 {
-                    await ReplaceAdaptiveImageUri(image).ConfigureAwait(false);
+                    await ReplaceAdaptiveImageUri(settings, image).ConfigureAwait(false);
                 }
             }
             else if (element is AdaptiveContainer container)
             {
                 foreach (var item in container.Items)
                 {
-                    await ReplaceAdaptiveImageUri(item).ConfigureAwait(false);
+                    await ReplaceAdaptiveImageUri(settings, item).ConfigureAwait(false);
                 }
             }
             else if (element is AdaptiveColumnSet columnSet)
             {
                 foreach (var item in columnSet.Columns)
                 {
-                    await ReplaceAdaptiveImageUri(item).ConfigureAwait(false);
+                    await ReplaceAdaptiveImageUri(settings, item).ConfigureAwait(false);
                 }
             }
         }
@@ -690,10 +696,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Process animation card and convert it to WeChat response messages.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity from bot.</param>
         /// <param name="attachment">An <see cref="Attachment"/> contains animation card content.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessAnimationCardAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessAnimationCardAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var messages = new List<IResponseMessageBase>();
             var animationCard = attachment.ContentAs<AnimationCard>();
@@ -707,13 +714,13 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             // Add image
             if (!string.IsNullOrEmpty(animationCard.Image?.Url))
             {
-                messages.Add(await MediaContentToWeChatResponse(activity, animationCard.Image.Alt, animationCard.Image.Url, MediaTypes.Image).ConfigureAwait(false));
+                messages.Add(await MediaContentToWeChatResponse(settings, activity, animationCard.Image.Alt, animationCard.Image.Url, MediaTypes.Image).ConfigureAwait(false));
             }
 
             // Add mediaUrls
             foreach (var mediaUrl in animationCard.Media ?? new List<MediaUrl>())
             {
-                messages.Add(await MediaContentToWeChatResponse(activity, mediaUrl.Profile, mediaUrl.Url, MediaTypes.Image).ConfigureAwait(false));
+                messages.Add(await MediaContentToWeChatResponse(settings, activity, mediaUrl.Profile, mediaUrl.Url, MediaTypes.Image).ConfigureAwait(false));
             }
 
             // Add buttons
@@ -725,19 +732,20 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Process adaptive card and convert it into WeChat response messages.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity from bot.</param>
         /// <param name="attachment">An <see cref="Attachment"/> contains adaptive card content.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessAdaptiveCardAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessAdaptiveCardAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var messages = new List<IResponseMessageBase>();
             var adaptiveCard = attachment.ContentAs<AdaptiveCard>();
             try
             {
-                var news = await CreateNewsFromAdaptiveCard(activity, adaptiveCard, attachment.Name).ConfigureAwait(false);
+                var news = await CreateNewsFromAdaptiveCard(settings, activity, adaptiveCard, attachment.Name).ConfigureAwait(false);
 
                 // TODO: Upload news image must be persistent media.
-                var uploadResult = await _wechatClient.UploadNewsAsync(new News[] { news }, false).ConfigureAwait(false);
+                var uploadResult = await _wechatClient.UploadNewsAsync(settings, new News[] { news }, false).ConfigureAwait(false);
                 var mpnews = new MPNewsResponse(activity.From.Id, activity.Recipient.Id, uploadResult.MediaId);
                 messages.Add(mpnews);
             }
@@ -755,15 +763,16 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Convert hero card to WeChat response message.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity from bot.</param>
         /// <param name="attachment">An <see cref="Attachment"/> contains hero card content.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessHeroCardAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessHeroCardAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var messages = new List<IResponseMessageBase>();
             var heroCard = attachment.ContentAs<HeroCard>();
-            var news = await CreateNewsFromHeroCard(activity, heroCard).ConfigureAwait(false);
-            var uploadResult = await _wechatClient.UploadNewsAsync(new News[] { news }, _uploadTemporaryMedia).ConfigureAwait(false);
+            var news = await CreateNewsFromHeroCard(settings, activity, heroCard).ConfigureAwait(false);
+            var uploadResult = await _wechatClient.UploadNewsAsync(settings, new News[] { news }, _uploadTemporaryMedia).ConfigureAwait(false);
             var mpnews = new MPNewsResponse(activity.From.Id, activity.Recipient.Id, uploadResult.MediaId);
             messages.Add(mpnews);
             messages.AddRange(ProcessCardActions(activity, heroCard.Buttons));
@@ -774,10 +783,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Convert video card to WeChat response message.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity from bot.</param>
         /// <param name="attachment">An <see cref="Attachment"/> contains video card content.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessVideoCardAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessVideoCardAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var messages = new List<IResponseMessageBase>();
             var videoCard = attachment.ContentAs<VideoCard>();
@@ -790,7 +800,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             if (!string.IsNullOrEmpty(videoCard.Image?.Url))
             {
                 // TODO: WeChat doc have thumb_media_id for video mesasge, but not implemented in current package.
-                var reponseList = await MediaContentToWeChatResponse(activity, videoCard.Title, videoCard.Media[0].Url, MediaTypes.Video).ConfigureAwait(false);
+                var reponseList = await MediaContentToWeChatResponse(settings, activity, videoCard.Title, videoCard.Media[0].Url, MediaTypes.Video).ConfigureAwait(false);
                 if (reponseList is VideoResponse videoResponse)
                 {
                     video = new Video(videoResponse.Video.MediaId, videoCard.Title, body);
@@ -807,10 +817,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// Convert audio card as music resposne.
         /// Thumbnail image size limitation is not clear.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">Message activity from bot.</param>
         /// <param name="attachment">An <see cref="Attachment"/> contains audio card content.</param>
         /// <returns>List of WeChat response message.</returns>
-        private async Task<IList<IResponseMessageBase>> ProcessAudioCardAsync(IMessageActivity activity, Attachment attachment)
+        private async Task<IList<IResponseMessageBase>> ProcessAudioCardAsync(WeChatSettings settings, IMessageActivity activity, Attachment attachment)
         {
             var messages = new List<IResponseMessageBase>();
             var audioCard = attachment.ContentAs<AudioCard>();
@@ -828,7 +839,7 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
             // upload thumbnail image.
             if (!string.IsNullOrEmpty(audioCard.Image?.Url))
             {
-                var reponseList = await MediaContentToWeChatResponse(activity, audioCard.Image.Alt, audioCard.Image.Url, MediaTypes.Image).ConfigureAwait(false);
+                var reponseList = await MediaContentToWeChatResponse(settings, activity, audioCard.Image.Alt, audioCard.Image.Url, MediaTypes.Image).ConfigureAwait(false);
                 if (reponseList is ImageResponse imageResponse)
                 {
                     music.ThumbMediaId = imageResponse.Image.MediaId;
@@ -845,17 +856,18 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
         /// <summary>
         /// Upload media to WeChat and map to WeChat Response message.
         /// </summary>
+        /// <param name="settings">WeChat settings.</param>
         /// <param name="activity">message activity from bot.</param>
         /// <param name="name">Media's name.</param>
         /// <param name="content">Media content, can be a url or base64 string.</param>
         /// <param name="contentType">Media content type.</param>
         /// <returns>WeChat response message.</returns>
-        private async Task<IResponseMessageBase> MediaContentToWeChatResponse(IMessageActivity activity, string name, string content, string contentType)
+        private async Task<IResponseMessageBase> MediaContentToWeChatResponse(WeChatSettings settings, IMessageActivity activity, string name, string content, string contentType)
         {
             var attachmentData = await CreateAttachmentDataAsync(name, content, contentType).ConfigureAwait(false);
 
             // document said mp news should not use temp media_id, but is working actually.
-            var uploadResult = await _wechatClient.UploadMediaAsync(attachmentData, _uploadTemporaryMedia).ConfigureAwait(false);
+            var uploadResult = await _wechatClient.UploadMediaAsync(settings, attachmentData, _uploadTemporaryMedia).ConfigureAwait(false);
             return CreateMediaResponse(activity, uploadResult.MediaId, attachmentData.Type);
         }
 
