@@ -20,6 +20,8 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat.Schema
 
         public DateTimeOffset ExpireTime { get; set; }
 
+        public int ExpireIn { get; set; }
+
         public string ETag { get; set; }
     }
 }
