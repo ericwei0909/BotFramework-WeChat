@@ -97,6 +97,11 @@ namespace Microsoft.Bot.Builder.Adapters.WeChat
                     fileName = contentDisposition.FileName;
                 }
 
+                if (string.IsNullOrWhiteSpace(fileName))
+                {
+                    return mediaId;
+                }
+
                 return fileName;
             }
             catch (Exception)
